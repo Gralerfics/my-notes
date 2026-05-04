@@ -63,9 +63,9 @@ $ <equ:sarsa_target>
 
   我们需要澄清一个重要的原则，关于#underline[所谓的目标（target）应该怎样去选取]，以回答问题：为什么前面 SARSA、Q-Learning 等算法采用现在这样的目标？它们为什么有效？
 
-  #underline[一个重要的判断是]：一个合法的、可用于优化的目标，其条件期望必须等同于我们要学习的对象，这样我们才能通过更新让估计趋近这个目标。
+  #underline[一个重要的判断是]：一个有效目标的条件期望必须等同于我们要学习的对象。注意#underline[这不是一个规则]，而是在迭代更新方法框架下得到的一个方便的推论。
 
-  我们得举点例子说明。#underline[在 Q-Learning 中]我们希望学习的是最优动作值函数 $Q^* (s, a)$，定义随机变量 $Y_t^* := r(S_t, A_t) + gamma max_a Q^* (S_(t+1), a)$，由最优贝尔曼方程 @equ:q_bellman_optimal 可知其条件期望满足：
+  我们得举点例子说明，例如#underline[在 Q-Learning 中]我们希望学习的是最优动作值函数 $Q^* (s, a)$，定义随机变量 $Y_t^* := r(S_t, A_t) + gamma max_a Q^* (S_(t+1), a)$，由最优贝尔曼方程 @equ:q_bellman_optimal 可知其条件期望满足：
 
   $
   EE_pi [Y_t^* mid(|) S_t = s, A_t = a] = Q^* (s, a)
@@ -96,6 +96,8 @@ $ <equ:sarsa_target>
   $
   "optimal" Q^* <- "objective" Q^pi =^! EE ["target" Y_t^"SARSA"]
   $
+
+  之后我们基于相同结构的目标构造损失函数使用残差梯度法更新时，会发现结果是有偏的。#underline[正儿八经证明上述 Q-Learning 和 SARSA 的收敛性和无偏性]还是要通过最优贝尔曼方程或贝尔曼期望方程的去证明不动点的存在性和唯一性。
 ])
 
 == Value Approximation
@@ -110,47 +112,67 @@ $
 
 参数化后的值函数自然无法再用表格式算法的方式进行更新，通常我们采用梯度更新的方式对参数进行更新。于是我们现在需要考虑的问题变为：1、用什么*损失函数*（loss function）；2、用什么计算*梯度*（gradients）。
 
-首先我们规定一些符号，每次发生状态转移的相关信息都是一条 TD 样本：
+=== Dataset
+
+先规范一些符号问题，训练要有数据集，而数据集可以用多种方式表达。我们最关注的往往是状态转移，每次状态转移都会带来一条关于 “在某状态采取某行动会产生什么后果” 的信息，所以在#underline[部分]算法中我们以 $(s_k, a_k, r_k, s_(k+1), a_(k+1))$ 的元组作为最小单位进行存储，而不在意其采样自何种策略、时间戳是多少。比如普通的 Q-Learning 也不在乎 $a_(k+1)$，可以只存：
 
 $
-(s_t, a_t, r_t, s_(t+1), a_(t+1))
+cal(D) = {(s_k, a_k, r_k, s_(k+1))}_(k=1)^n
 $
 
-采样得到的一条或多条轨迹中收集到的 $n$ 条 TD 样本构成数据集，记为：
+实际实现中通常还会存下一个状态 $s_(k+1)$ 是否是终端状态方便从目标中剔除后续项，例如直接加一个 $"done"_k in {0, 1}$：
 
 $
-cal(D) = {(s_t, a_t, r_t, s_(t+1), a_(t+1))}_(t=1)^n
+cal(D) = {(s_k, a_k, r_k, s_(k+1), "done"_k)}_(k=1)^n
 $
+
+但这也不绝对，比如说很多 on-policy 算法需要知道样本对应的采样策略，例如之后的 PPO 算法会用到样本对应的采样概率（的对数值）和值函数估计：
+
+$
+cal(D) = {(s_k, a_k, r_k, s_(k+1), "done"_k, log pi_"old" (a_k mid(|) s_k), V^"old" (s_k))}_(k=1)^n
+$
+
+而且毕竟是 on-policy 算法，也没什么写成集合 $cal(D)$ 的必要，按顺序 $s_(k+1)$ 一般就是下一条数据的 $s_k$，可以不存它。还有一些基于 Monte Carlo 的算法需要整条轨迹信息，需要保持采样轨迹的完整结构：
+
+$
+cal(D) = {tau_k}_(k=1)^n, quad tau_k = (s_0, a_0, r_0, s_1, dots, r_(n_k-1), s_(n_k))
+$
+
+举例这么多就是说明这需要根据实际需求选择。现在我们的需求是为下面提出的方法铺垫，故作一些简化假设。假设所有样本都采集自固定的策略 $pi$，并且无所谓顺序，以状态转移为最小单元存储：
+
+$
+cal(D)_pi = {(s_k, a_k, r_k, s_(k+1), a_(k+1))}_(k=1)^n
+$
+
+为了方便证明，我们用随机变量刻画采样过程：
+
+$
+D = (S_t, A_t, R_t, S_(t+1), A_(t+1)) ~ P_(cal(D)_pi) (dot)
+$
+
+$P_(cal(D)_pi) (dot)$ 是采样分布，只是为了完善记号，之后我们就用 $EE_(cal(D)_pi) [dot]$ 代表 $EE_(D~P_(cal(D)_pi) (dot)) [dot]$。
 
 === Residual Value Gradients <sec:residual_gradients>
 
-最常用的损失函数仍然是*均方误差*（mean-squared error，MSE），考虑值函数估计 $v_theta (s)$ 和目标之间在整个数据集 $cal(D)$ 上的均方误差：
+最常用的损失函数仍然是*均方误差*（mean-squared error，MSE），考虑值函数估计 $v_theta (s)$ 和目标之间在数据集 $cal(D)_pi$ 上的均方误差：
 
 $
-cal(L)[theta] := EE_cal(D) [(overbrace(underbrace(r_t + gamma v_theta (s_(t+1)), "target" y_t) - v_theta (s_t), "TD-error"))^2]
+cal(L)[theta] := EE_(cal(D)_pi) [(overbrace(underbrace(R_t + gamma v_theta (S_(t+1)), "target" Y_t) - v_theta (S_t), "TD-error"))^2]
 $ <equ:loss_vfunc_rvg>
 
-这里使用 $EE_cal(D)$ 的#underline[表述也不严谨]，毕竟我们是把 $cal(D)$ 写成了样本集合的形式而非随机分布，表示平均值这里最好是直接用 $"mean"[dot]$。严格一点我们写成：
+动作值函数的版本如下：
 
 $
-D = (S_t, A_t, R_t, S_(t+1), A_(t+1)) ~ P_cal(D) (dot)
-$
-
-也并非不可，不过全小写在之后好看一点，也更像采样采来的，就这样保留原记号了。如果用动作值函数：
-
-$
-cal(L)[theta] := EE_cal(D) [(overbrace(underbrace(r_t + gamma q_theta (s_(t+1), a_(t+1)), "target" y_t) - q_theta (s_t, a_t), "TD-error"))^2]
+cal(L)[theta] := EE_(cal(D)_pi) [(overbrace(underbrace(R_t + gamma q_theta (S_(t+1), A_(t+1)), "target" Y_t) - q_theta (S_t, A_t), "TD-error"))^2]
 $ <equ:loss_qfunc_rvg>
 
-以上都是 on-policy 的，而后者实际上就是 SARSA。这一套损失函数设计与梯度更新方式称为*残差梯度*（residual gradients）法，平方项内的部分称为*残差*（residues）。
+可以看出它们的设计是对应 on-policy 策略的，而后者实际上就是 SARSA。直接采用梯度下降法优化损失函数，这一套损失函数设计与梯度更新方式称为*残差梯度*（residual gradients）法，平方项内的部分可视为*残差*（residues）。
 
-残差 $y_t - q_theta (s_t, a_t)$ 的形式和 @equ:tab_ql_update_residue 中 $y_t - Q(s_t, a_t)$ 也是一致的，就如前文所述，$y_t$ 是条件期望等于欲学习对象的目标样本，而#underline[残差本质上就是在衡量当前估计与目标的距离]，优化该损失函数就是在尝试推动 $q_theta$ 收敛到欲学习的对象。
+残差 $Y_t - q_theta (S_t, A_t)$ 的形式和 @equ:tab_ql_update_residue 中 $y_t - Q(s_t, a_t)$ 也是一致的，就如前文所述，$Y_t$ 是条件期望等于欲学习对象的目标，而#underline[残差本质上就是在衡量当前估计与目标的距离]，优化该损失函数就是在尝试推动 $q_theta$ 收敛到欲学习的对象。
 
-但要注意，目标 $y_t$ 中用到了 $q_theta (s_(t+1), a_(t+1))$，它也是基于当前参数 $theta$ 的一个#underline[近似值而不是真实的] $Q^* (s_(t+1), a_(t+1))$，这导致它实际无法真的令 $q_theta$ 收敛到 $Q^*$。类似这种 “用估计的参数当目标去优化参数估计” 的行为我们称为*自举*（bootstrapping），也是引发问题的根源。细节上的不同使得这种自举迭代可能让结果收敛（例如值迭代和表格式 Q-Learning），也可能导致发散或产生稳态误差。
+但要注意，目标 $Y_t$ 中用到了 $q_theta (S_(t+1), A_(t+1))$，它也是基于当前参数 $theta$ 的一个#underline[近似值而不是真实的] $Q^* (S_(t+1), A_(t+1))$，这导致它实际无法真的令 $q_theta$ 收敛到 $Q^*$。类似这种 “用估计的参数当目标去优化参数估计” 的行为我们称为*自举*（bootstrapping），也是引发问题的根源。细节上的不同使得这种自举迭代可能让结果收敛（例如值迭代和表格式 Q-Learning），也可能导致发散或产生稳态误差。
 
-我们在#underline[前文 Q-Learning 的收敛性中讨论过这一问题，当时可以用最优贝尔曼算子证明其最终仍然收敛到最优值，但此处残差梯度法的更新略有不同]，接下来就具体讨论这个问题。
-
-为了更清晰地展示参数的变化，我们以残差梯度法更新表格式 Q-Learning 为例进行说明。它也可以视作一种参数化，只不过参数就是所有表格值 $theta := bold(Q) = {Q_(s,a)} in RR^(abs(cal(S)) times abs(cal(A)))$。写出 Q-Learning 观察到转移 $(s_t, a_t, r_t, s_(t+1))$ 后的一步损失：
+#underline[在 Q-Learning 的迭代更新框架下可以证明其最终仍然收敛到最优值，但此处残差梯度法的结果略有不同]，接下来就具体讨论这个问题。为了更清晰地展示参数的变化，我们以表格式 Q-Learning 为例进行说明。它也可以视作一种参数化，只不过参数就是所有表格值 $theta := bold(Q) = {Q_(s,a)} in RR^(abs(cal(S)) times abs(cal(A)))$。写出 Q-Learning 观察到转移 $(s_t, a_t, r_t, s_(t+1))$ 后的一步损失：
 
 $
 cal(L)[bold(Q)] := (r_t + gamma Q_(s_(t+1), a^*) - Q_(s_t, a_t))^2, quad a^* := arg max_a Q_(s_(t+1), a)
@@ -183,9 +205,25 @@ $
 
 第一部分 $Q_(s_t, a_t)$ 的更新没有什么问题，$r_t + gamma Q_(s_(t+1), a^*)$ 就是 $y_t$，和之前 @equ:tab_ql_update_interp 中完全一致；但这里还多出了第二部分 $Q_(s_(t+1), a^*)$ 的更新，这就是与前文标准的表格式 Q-Learning 不一致的地方了。
 
-这会导致两个问题，#underline[首先最重要的是多了这一项的残差梯度是*有偏的*（biased），无法再令参数收敛到正确值]。因为利用贝尔曼最优算子我们证明 $Q^*$ 是最优贝尔曼方程的唯一不动点解，且标准表格式 Q-Learning 会收敛到这个解，但现在残差梯度化简后与其存在偏差，自然收敛结果也有偏差。
+这会导致两个问题，#underline[首先最重要的是多了这一项的残差梯度是*有偏的*（biased），无法再令参数收敛到正确值]，证明见后。我们可以先从现有结论上接受这一点：利用贝尔曼最优算子可以证明 $Q^*$ 是最优贝尔曼方程的唯一不动点解，且标准表格式 Q-Learning 通过迭代更新会收敛到这个解；但如前所述，现在残差梯度化简后比迭代更新的式子多了一条，多半结果也会有偏差。
 
 第二是#underline[违背了*因果性*（causality）]。具体地，更新的本质是树立一个目标对当前参数 $Q_(s_t, a_t)$ 进行调整，但残差梯度同时还去更新了未来状态的参数 $Q_(s_(t+1), a^*)$。这种#underline[参数估计和目标同时在变]的情况自然会导致更新过程不稳定，参数信息传播和学习速度变慢。
+
+#blockquote([
+  *关于基于一步 TD 目标的残差梯度法在固定策略数据上优化结果有偏的证明*：
+
+  标题叠了一堆甲，主要是关于几点假设：1、用残差梯度法直接优化；2、以值函数采样目标 $y_t := r_t + gamma v_theta (s_(t+1))$ 为例；3、数据集采样自固定策略 $pi$。
+
+  如果按之前讨论的目标设计要求，该目标的条件期望正是我们希望估计的 $V^pi (s)$，没有问题；但我们从迭代更新框架迁移到损失函数优化问题上这一过程只能说是直觉的，实际上没道理认为目标设计一致就能直接用，仍然需要证明，而结果也确有问题。
+
+  接下来我们具体证明直接对 @equ:loss_vfunc_rvg 应用残差梯度更新所得结果是有偏的。我们不是去证明迭代结果偏离，而是证明损失函数有偏（源于目标中采用的是对值函数的估计而非真实值函数），从而说明优化结果有偏。
+  
+  $
+  "TODO Assignment A1.3"
+  $
+
+  动作值函数的目标道理也差不多，不再赘述。
+])
 
 === Value Semi-gradients <sec:semi_gradients>
 
@@ -194,10 +232,10 @@ $
 回到参数化损失 @equ:loss_vfunc_rvg，问题本质是目标 $y_t$ 依赖当前参数估计 $theta$，那么我们可以通过将目标中的 $v_theta$ 替换为另一组迟滞参数驱动的 $v_(theta')$ 来削减这种耦合：
 
 $
-cal(L)[theta] := EE_cal(D) [(underbrace(r_t + gamma v_(theta') (s_(t+1)), "bootstrapped target" y_t) - v_theta (s_t))^2]
+cal(L)[theta] := EE_(cal(D)_pi) [(underbrace(R_t + gamma v_(theta') (S_(t+1)), "bootstrapped target" Y_t) - v_theta (S_t))^2]
 $
 
-这样在更新时就有 $nabla_theta v_(theta') (s_(t+1)) = 0$，对应舍去的那一部分梯度。实际更新时 $theta'$ 的数值是和 $theta$ 相等的（$theta' = theta$），所以说明白点就#underline[只是反向传播时切断了 $theta'$ 的这一部分梯度]，前向传播时照旧。
+这样在更新时就有 $nabla_theta v_(theta') (S_(t+1)) = 0$，对应舍去的那一部分梯度。实际更新时 $theta'$ 的数值是和 $theta$ 相等的（$theta' = theta$），所以说明白点就#underline[只是反向传播时切断了 $theta'$ 的这一部分梯度]，前向传播时照旧。
 
 以上更新方式称为*半梯度有限差分学习*（semi-gradient TD-learning）。在 PyTorch 具体实现中，给相应项加上 `.detach()` 即可实现只截断某一部分反向传播的操作。该方案#underline[比残差梯度法更快且无偏]，对#underline[线性模型可以证明收敛]，例如前文表格 Q-Learning 的例子。
 
