@@ -32,8 +32,4 @@
     // listing-index: (enabled: true),
 )
 
-#include "sections/introduction.typ"
-#include "sections/fundamentals.typ"
-#include "sections/lse.typ"
-#include "sections/kalman.typ"
-#include "sections/system_id.typ"
+#include "main.typ"

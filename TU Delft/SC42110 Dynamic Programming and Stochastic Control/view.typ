@@ -14,7 +14,7 @@
 )
 
 #show: ilm.with(
-    title: [Notes of Estimation and Detection],
+    title: [Notes of Dynamic Programming and Stochastic Control],
     author: "Gralerfics",
     // date: datetime(year: 2025, month: 10, day: 12),
     date: datetime.today(),

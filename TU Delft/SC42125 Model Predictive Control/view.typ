@@ -14,7 +14,7 @@
 )
 
 #show: ilm.with(
-    title: [Notes of Model Predictive Control (TODO)],
+    title: [Notes of Model Predictive Control],
     author: "Gralerfics",
     // date: datetime(year: 2025, month: 10, day: 12),
     date: datetime.today(),
@@ -32,5 +32,4 @@
     // listing-index: (enabled: true),
 )
 
-#include "sections/intro_bkg.typ"
-#include "sections/stability.typ"
+#include "main.typ"

@@ -32,8 +32,4 @@
     // listing-index: (enabled: true),
 )
 
-#include "sections/fundamentals.typ"
-#include "sections/state_feedback.typ"
-#include "sections/output_feedback_and_gcs.typ"
-#include "sections/discrete_time_lsc.typ"
-#include "sections/mpc.typ"
+#include "main.typ"

@@ -32,9 +32,4 @@
     // listing-index: (enabled: true),
 )
 
-#include "sections/week_1.typ"
-#include "sections/week_2.typ"
-#include "sections/week_3.typ"
-#include "sections/week_4.typ"
-#include "sections/week_5.typ"
-#include "sections/week_6.typ"
+#include "main.typ"
