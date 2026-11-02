@@ -37,9 +37,13 @@ https://zhuanlan.zhihu.com/p/1981673900472557572
 
 *训练*。初始化编码器 $q_(phi.alt) (z mid(|) a_(t:t+k), macron(o)_t)$ 和解码器 $pi_theta (hat(a)_(t:t+k) mid(|) o_t, z)$。反复迭代如下步骤：从数据集 $cal(D)$ 采样观测 $o_t$ 和长度为 $k$ 的动作序列 $a_(t:t+k)$，从编码器基于此输出的分布中采样得到 $z$，和 $o_t$ 一起经过解码器得到预测动作序列 $hat(a)_(t:t+k)$，计算两个动作序列的 MSE 作为重建误差 $cal(L)_"reconst"$，并计算编码器 $q_(phi.alt)$ 和标准正态分布 $cal(N) (0, I)$ 之间的 KL 散度作为正则项 $cal(L)_"reg"$，得到损失函数 $cal(L) = cal(L)_"reconst" + beta cal(L)_"reg"$，用 ADAM 更新参数 $theta$ 和 $phi.alt$。
 
+关于 $z$，具体地，考虑人类演示数据中对相同状态可能存在很多种不同合理轨迹，$z$ 希望表达的就是这种轨迹风格的倾向，防止训练时学到各种路径的平均。如果学到的 $z$ 分布接近 $cal(N) (0, I)$ 就说明它基本被忽略了，例如在 scripted 数据中，同观测通常对应一致的轨迹。之后的推理中直接令 $z = 0$，采用默认的风格进行预测。
+
 *推理*。初始化一组 FIFO 缓存 $cal(B)[0:T]$，每个 $cal(B)[t]$ 是一个 FIFO，存储不同预测动作块中 $t$ 时刻的动作。反复迭代如下步骤：令 $z = 0$，基于 $o_t$ 解码预测 $hat(a)_(t:t+k)$，将其各元素分别塞进 $cal(B)[t:t+k]$，得到当前时刻的一组动作 $A_t = cal(B)[t]$，再应用 $a_t = sum_i exp(-m i) A_t [i] \/ sum_i w_i$ 即时序集成加权得到当前动作输出。
 
-*实验和结果*。#Cre("TODO")
+*实验设计*。定义了六个 real-world tasks 和两个仿真 tasks，并详细描述各自的初始条件和 subtasks，以及数据采集方式。分别进行多次实验分阶段计算 success rate，对仿真 tasks 还区分使用 scripted 数据和 human 数据时的区别（实验结果上用 human 数据训练成功率总体低于用 scripted 数据训练）。
+
+之后是消融（ablation）实验。先是 action chunking 的作用，通过比较不同方法在不同 chunk 长度 $k$ 下的表现展现。然后是时序集成（TE）有无对各方法表现的影响。接下来是 CVAE 的作用，分别比较 human 数据和 scripted 数据下，使用和不使用（直接通过观测预测动作）CVAE 对表现的影响。最后是研究遥操作控制频率对人类演示者录制数据速度的影响。
 
 #pagebreak()
 == $pi_0$: A Vision-Language-Action Flow Model for General Robot Control
@@ -98,7 +102,7 @@ $pi_0$ 中将 tokens 划分为顺序的三部分（block）：image/language（p
 
 第一个 block 是送进预训练 VLM 的 token，这样的设计可以确保后面的 state 和 noisy actions 不污染 VLM 给出的语义，同时这也是前面提到的在 flow integration 中可以缓存 prefix KV 的前提。
 
-第二个 block 是 state，令其不可见 noisy actions 表示其不会受 flow integration 的影响，也可以缓存
+第二个 block 是 state，令其不可见 noisy actions 表示其不会受 flow integration 的影响，也可以缓存，但只占一个 token，没必要。
 
 === 官方实现
 
@@ -115,11 +119,13 @@ $pi_0$ 中将 tokens 划分为顺序的三部分（block）：image/language（p
 
 // 然后 `jnp.einsum("i,j->ij", pos, freq)` 等价于外积 `pos[:, None] * freq[None, :]`，外面套上 sin 和 cos，最后直接拼接在一起。
 
-详见代码注释
+详见代码注释。
 
-==== #Cre("TODO")
+=== 实验设计
 
+主要探几个问题：1、引入预训练 VLM 后泛化能力如何：直接评估 $pi_0$。2、遵循语言指令的表现如何：比较 $pi_0$ 和 $pi$-small（无 VLM 初始化）。3、在灵巧操作任务上 $pi_0$ 相对其他方法表现如何。4、能否用于复杂、多阶段任务：……。
 
+#Cre("TODO")
 
 #pagebreak()
 == Universal Manipulation Interface: In-The-Wild Robot Teaching Without In-The-Wild Robots
@@ -152,7 +158,17 @@ https://zhuanlan.zhihu.com/p/2003882878099014705
 
 文章提到用来自 Youtube 等的大量 in-the-wild video data 进行训练，这种数据中没有机器人动作标签，通常不直接行为克隆，而是先从中提取一些学习的中间信号。文章提到了一系列相关工作，这里简要总结一下：
 
-1、任务代价/奖励函数。
+#Cre("TODO")
+
+=== Method
+
+#Cre("TODO")
+
+==== Policy Interface
+
+原本假设图像、状态等观测数据都是同步的（比如每一帧各一个构成一组），但实际中各传感器频率可能不同，需要处理同步令其可以送入 diffusion policy；预测得到动作准备发送出去执行时也需要考虑到执行器的延时，提前发出一些指令使得执行端也同步。
+
+还有一个重点是 relative trajectory。这个相对是指生成的动作序列中，后面动作是相对这串动作中 $t_0$ 时动作的，而不是说相邻动作间的相对。除了 action，pose 和 gripper 也就是 proprioception states 也类似。
 
 #Cre("TODO")
 
@@ -164,10 +180,6 @@ https://zhuanlan.zhihu.com/p/1910755399646287695
 $pi_0$ 是基于 flow matching 的 diffusion VLA，常见的还有一类是基于自回归（AR）的 VLA，即和原本 transformer 类似的预测 next token 的形式。但由于动作信号是连续的，需要将动作化为离散的 token。最简单的方法是逐维度、逐时间步分 bin，举个例子，长度 $H$ 的 action chunk，每个 action 有 $D$ 维，可以把每个维度的连续数值归一化到 $[-1, 1]$，分成 $256$ 个离散区间，每个用一个离散 token 表达；要预测一个 chunk，就要预测 $H times D$ 次 next token 然后拼起来，这样做问题不少：速度慢和量化误差是必然有的，此外同一个 action 不同维度被分开预测破坏了其间的耦合，而且这样硬拆散的操作让生成过程看不到完整轨迹的结构，丢失了很多性质，总之在处理高频控制灵巧操作时表现很差。
 
 对此，可以寻找更好的 tokenization 方法，将冗余的动作信号*压缩*成较少数量的高信息密度的 token。FAST 是频率空间动作序列 token 化（frequency-space action sequence tokenization），能大幅加快训练速度。
-
-=== Action Representations for VLA Training
-
-#Cre("TODO")
 
 === FAST
 
@@ -182,14 +194,181 @@ $pi_0$ 是基于 flow matching 的 diffusion VLA，常见的还有一类是基�
 #pagebreak()
 == GR00T N1: An Open Foundation Model for Generalist Humanoid Robots
 
+https://blog.csdn.net/v_JULY_v/article/details/146376514
+
+三类数据质量从高到低：1、现实世界采集的数据；2、合成数据（如来自仿真的数据）；3、网络数据和人类视频。
+
+=== GR00T N1 Foundation Model
+
+包括一个 VLM backbone 和一个 DiT-based（diffusion transformer） flow-matching policy，其中 VLM 是 NVIDIA 的 Eagle-2。VLM 称为系统 2，DiT 部分为系统 1。训练数据是人类视频、仿真、生成数据和真实机器人演示的混合。训练一个 massively multi-task, language-conditioned policy。
+
+*架构*。$pi_0$ 的 VLM 和 action expert 虽然是两套权重，但整体可看作一个大 transformer，通过 blockwise attention mask 控制信息流向。GR00T N1 中二者是分开的，每个 DiT block 通过多组交叉注意力读取 VLM 输出的 token，更像标准的 encoder-decoder 结构。后面的 flow matching 也就是 DiT 部分和 $pi_0$ 差不多。
+
+*训练数据生成*。1、人类第一人称视频数据和 VLM 预训练所用网络数据。2、用预训练视频生成模型生成 synthetic neural trajectories，借此将室内收集得到真实轨迹数据翻了近十倍。3、此外还有仿真轨迹。
+
+这涉及到两个问题，先第一个，是要从视频中提取 latent actions（潜在动作），以此从大规模人类第一人称数据集中提取标签。视频数据是不自带显式动作的，文章训练一个 VQ-VAE 模型从视频的连续图像帧中提取特征。编码器接受$t$ 时刻图像 $x_t$ 和固定的 $H$ 帧后的图像 $x_(t+H)$ 并输出潜在动作 $z_t$；解码器接受 $z_t$ 和当前帧 $x_t$ 输出重建的 $x_(t+H)$。潜在动作 $z_t$ 试图表示的就是 $t$ 到 $t+H$ 间的运动。VQ-VAE 中有一个可训练的码本（codebook），编码器输出的连续 continuous embedding 将映射到 codebook 中最近的离散 embedding，再进行重建，训练好后将 encoder 部分就可以视作一个 inverse dynamic model：接受 $x_t$ 和 $x_(t+H)$ 输出潜在动作 continuous pre-quantized embedding（也就是不像训练 VQ-VAE 时离散化，直接用连续的输出）。不过这个潜在动作空间的定义不同于实际机器人，所以说视为一个 “LAPA” embodiment 的逆动力学，但不管怎么说就是 “观测” 到 “动作” 的映射。这个潜在动作就作为预训练所用的潜在动作标签，预训练时就用和 flow-matching loss 差不多的方法训练模型从当前观测中预测动作（在同一个潜在动作空间）的能力。对于不同 embodiment 的训练数据采用不同的 MLP 映射层，DiT 共享。
+
+第二个是如何生成前述 neural and simulated 机器人轨迹并从中取得 actions。主要是基于视频生成式模型，加上一个用于评判并剔除不符合语言描述结果的模型。还有仿真数据，提出 DexMimicGen，基于一个人类录制数据的小数据集，通过变换和仿真重放自动扩充数据集。#Cre("TODO")
+
+*训练*。
+
+#Cre("TODO")
+
+*实验设计*。
+
 #Cre("TODO")
 
 #pagebreak()
 == OpenVLA: An Open-Source Vision-Language-Action Model
 
+#image("../assets/openvla_overview.png")
+
+*架构*。不同于 flow matching，OpenVLA 是基于自回归的。OpenVLA 基于 Prismatic-7B VLM，含一个 600M 的视觉编码器（是分别送入 DinoV2 和 SigLIP，将输出特征拼接而成，称相较于 CLIP- 和 SigLIP-only，DinoV2 有助于提升空间推理能力），一个两层 MLP 投影层和一个 7B 的 Llama 2 语言模型 backbon。输出就经过 de-tokenizer 得到预测的动作。
+
+连续动作的每一维被离散化到 256 个 bin 之一，bin 是将该维度数据从 1st 到 99th 分位数这一范围划分 256 份得到的。Llama 的 tokenizer 没有预留足够的空余 token，文章直接选最后 256 个 token 拿来当作 action token。
+
+*实验设计*。
+
 #Cre("TODO")
 
 #pagebreak()
 == $pi_(0.5)$: A Vision-Language-Action Model with Open-World Generalization
+
+#image("../assets/pi05_overview.png")
+
+图上左右是两个阶段，不是连在一起的架构。
+
+预训练用各种来源的多模态互联网和机器人数据以及 task-specific prompts，训练目标很杂，language subtasks、动作（这里用 FAST 等离散化为 action tokens）、open vocabulary captions、bounding boxes 都有。
+
+后训练用任务直接相关的优质数据。推理时似乎一个模型打算用两次，输入观测和 task 会给出语言 token 和 flow-matching 的 actions，先给 task 将语言输出作为 subtask，然后再给进去 subtask 拿走 actions 去执行，相当于：
+
+$
+pi_theta (bold(a)_(t:t+H), hat(l) mid(|) bold(o)_t, l) = pi_theta (bold(a)_(t:t+H) mid(|) bold(o)_t, hat(l)) pi_theta (hat(l) mid(|) bold(o)_t, l)
+$
+
+所以后训练时也要同时训练这两种能力：语言 subtask 监督以及 flow matching loss 监督。
+
+*训练细节*。
+
+具体的数据流，训练目标，mask 设计等。
+
+#Cre("TODO")
+
+*实验设计*。
+
+#Cre("TODO")
+
+#pagebreak()
+== $pi^*_(0.6)$: A VLA That Learns From Experience
+
+https://zhuanlan.zhihu.com/p/1974235172674229147
+
+https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/recap.html
+
+#image("../assets/pistar06_overview.png")
+
+$pi_(0.6)$ 和 $pi_(0.5)$ 没有本质架构差别，主要是扩大规模和一些细节的调整。$pi^*_(0.6)$ 在此基础上提出 RECAP，通过示范、自主 rollout 和人工干预纠错进行强化学习。
+
+
+
+#Cre("TODO")
+
+#pagebreak()
+== SmolVLA: A Vision-Language-Action Model for Affordable and Efficient Robotics
+
+#Cre("TODO")
+
+#pagebreak()
+== (VITRA)
+
+https://zhuanlan.zhihu.com/p/1994524164850209327
+
+#Cre("TODO")
+
+#pagebreak()
+== EgoMimic: Scaling Imitation Learning via Egocentric Video
+
+#image("../assets/egomimic_overview.png")
+
+是一个 "full-stack framework which scales manipulation via human embodiment data, specifically egocentric human videos paired with 3D hand tracking"，即用于人类第一人称视角具身数据（主要是三维手部动作）迁移学习的框架。主要包含：1、一套用 Project Aria 眼镜的数据采集系统；2、一个低成本双手操作臂；3、跨领域数据对齐技术和机器人数据；4、一个可在人类和机器人数据上联合训练的模仿学习架构。
+
+相比此前工作只从人类视频中学习高层意图，文章将其也作为了策略学习所用演示数据的一部分。
+
+EgoMimic 的策略模型还是基于 ACT 的那一套。
+
+=== Data Processing and Domain Alignment
+
+*原始数据流*。人类采集时通过 Aria 眼镜产生 ego-centric 的 RGB 图像，控制机器人采集时则在此基础上再加两个腕部图像。为表达本体感知（proprioception）信息，对人类采集数据通过 Aria 的服务估计双手的姿势 $attach(tl: H, p) in SS EE (3) times SS EE (3)$，对机器人采集数据则记录末端执行器的位姿 $attach(tl: R, p) in SS EE (3) times SS EE (3)$ 和关节位置 $attach(tl: R, q) in RR^(2 times 7)$（双臂各 7 自由度，包括夹爪）。最后是动作数据，人类采集时……，机器人采集时记录 TODO
+
+*统一人机数据坐标系*。机器人动作和本体数据通常采用固定参考系（相机、基座等），但第一人称数据中由于摄像头移动打破了其前提假设。为了统一，将人手和机器人末端执行器轨迹都统一到 camera-centered stable reference frames。考虑 ACT 中预测 action chunking 的思路，数据集中也要为人手或末端执行器建立动作块 $a_(t:t+h)^p$。TODO
+
+*对齐人机姿态分布*。TODO\*
+
+*弥补视觉外观差距*。TODO mask
+
+#Cre("TODO")
+
+=== 实验设计
+
+#Cre("TODO")
+
+#pagebreak()
+== EgoDex
+
+主要是通过 Apple Vision Pro 收集了一个体量巨大的人类第一视角操作数据集。
+
+*实验*。
+
+#Cre("TODO")
+
+#pagebreak()
+== EgoVLA
+
+之前的 EgoMimic 是将人机数据混合进行训练，将人类数据作为一种扩充。EgoVLA 指出人类动作空间和机器人动作空间差异应该不是很大，可以通过一些几何变换互相映射。
+
+EgoVLA 直接先基于人类视频数据，预训练学习预测 wrist pose 和 MANO hand parameter（降维的），再使用部分机器人演示数据，将其转换到前述动作空间进行后训练微调，最后推理时得到该空间的动作，逆映射到机器人关节后输出。
+
+#Cre("TODO")
+
+#pagebreak()
+== EgoScale
+
+预训练（pre-training）、中训练（mid-training）和后训练（post-training）。预训练过程在两万多小时人类 ego-centric 视频数据上训练（用 wrist motion 和 retargeted dexterous hand actions，即监督目标是手腕转动动作以及从人手重新映射过来的灵巧手关节动作），建立视觉上下文和手部运动的关联。中训练在对齐的人机混合数据上进行，建立人类操作表示到机器人感知和控制接口的关联。后训练针对目标下游任务在遥操作数据上微调。
+
+=== Method
+
+目标是从大规模人类中心数据中学习可以直接用于灵巧机器人控制的表征（representations），主要有两方面问题：1、人类演示中包含大量噪声，且缺乏对齐的机器人动作数据；2、人和机器人的运动学、控制接口等之间存在较大差异。
+
+预训练阶段用从大量人类中心视频中提取的腕部动作和手部关节迫使模型学习 physically grounded 动作表征，中训练则用少量人机对齐数据将这些动作表征 grounds 到可执行的机器人控制上。这两部将对 large-scale 数据的需求以及具身对齐的需求解耦，实现有效的迁移。大概就是前者学到一个完整的动作表征中，后者只需要再映射到具体 embodiments 的动作空间就行。
+
+关于机器人数据到 human data representation 的映射
+
+==== Human Action Representation
+
+*原始传感器数据流*。head-mounted RGB 摄像头，也会估计它相对世界坐标的位姿。手部识别为 21 个 keypoints，1 号是手腕，pose 相对的是视像头坐标系。
+
+*腕级手臂运动*。
+
+#Cre("TODO")
+
+#pagebreak()
+== UniHM
+
+关于不同手形态如何共享动作表示。
+
+#Cre("TODO")
+
+#pagebreak()
+== XL-VLA
+
+#Cre("TODO")
+
+#pagebreak()
+== UniDex
+
+#Cre("TODO")
+
+#pagebreak()
+== EgoLive
 
 #Cre("TODO")

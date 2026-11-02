@@ -61,3 +61,15 @@ $
 === Full Fine-Tuning
 
 === Low-Rank Adaptation (LoRA)
+
+原本模型记为 $y = W x$，LoRA 冻结原参数 $W$，在其上加一个矩阵 $Delta W = A B$ 作为微调参数，其中 $A in RR^(r times d_"input"), B in RR^(d_"output" times r)$，$r$ 通常较小（低秩），使得微调时参数量也更小。
+
+=== PEFT and `peft`
+
+Hugging Face peft 库
+
+== Other
+
+=== Classifier-Free Guidance (CFG)
+
+

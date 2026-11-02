@@ -1,4 +1,0 @@
-#import "../generic.typ": *
-
-= Introduction
-
